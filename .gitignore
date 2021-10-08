@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+.~lock.out.clean.csv#
+*.ipynb
+out*.csv
