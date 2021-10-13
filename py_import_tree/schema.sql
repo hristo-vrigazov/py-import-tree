@@ -1,17 +1,19 @@
+CREATE TABLE NODES (
+    id INTEGER PRIMARY KEY,
+    code_str TEXT UNIQUE
+);
 
 CREATE TABLE IMPORT_DATA (
     id INTEGER PRIMARY KEY ,
     root TEXT,
     module TEXT,
     path TEXT,
-    version TEXT
+    version TEXT,
+    node_id INTEGER NOT NULL,
+    FOREIGN KEY(node_id) REFERENCES NODES(id)
 );
 
-CREATE TABLE NODES (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    code_str TEXT
-);
+
 
 CREATE TABLE ADJACENCY_TABLE (
     id INTEGER PRIMARY KEY,
@@ -21,10 +23,3 @@ CREATE TABLE ADJACENCY_TABLE (
     FOREIGN KEY (child_id) REFERENCES NODES(id)
 );
 
-CREATE TABLE NODE_TO_IMPORT_DATA (
-    id INTEGER PRIMARY KEY ,
-    node_id INTEGER NOT NULL ,
-    import_data_id INTEGER NOT NULL ,
-    FOREIGN KEY (node_id) REFERENCES NODES(id),
-    FOREIGN KEY (import_data_id) REFERENCES IMPORT_DATA(id)
-)

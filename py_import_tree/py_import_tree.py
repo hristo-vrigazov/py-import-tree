@@ -1,15 +1,13 @@
-import os
-import sys
 import ast
-from collections import defaultdict
-from dataclasses import dataclass, field
-
-import astunparse
-
+import os
+import sqlite3
+import sys
 from multiprocessing import Process
 from pathlib import Path
+from sqlite3 import IntegrityError
 from typing import Union
 
+import astunparse
 from stdlib_list import stdlib_list
 
 
@@ -31,35 +29,22 @@ class AstImportsVisitor(ast.NodeVisitor):
         self.import_froms.append(node)
 
 
-@dataclass
-class TraversalData:
-    adjacency_list: defaultdict = field(default_factory=lambda: defaultdict(list))
-    nodes: dict = field(default_factory=dict)
-    node_name_to_code_str: dict = field(default_factory=dict)
-
-
-def should_traverse(traversal_state):
-    if traversal_state is None:
-        return True
-    if traversal_state == 'in_process':
-        return False
-    if traversal_state == 'processed':
-        return False
-    return True
-
-
-def get_working_directory(import_from_stmt):
-    pass
+def get_number_of_relative_step_backs(raw_module_str):
+    n = 0
+    for i in range(len(raw_module_str)):
+        if raw_module_str[i] != '.':
+            return n
+        n += 1
+    return n
 
 
 class ImportTracker:
 
-    def __init__(self, output_directory: Union[str, Path], blacklisting_function=None, hash_function=None):
+    def __init__(self, output_directory: Union[str, Path], blacklisting_function=None):
         self.output_directory = Path(output_directory)
         self.output_directory.mkdir(exist_ok=True)
         self.stdlib_packages_set = set(stdlib_list())
         self.blacklisting_function = blacklisting_function
-        self.hash_function = hash if hash_function is None else hash_function
 
     def module_should_be_tracked(self, key):
         if key.startswith('_'):
@@ -81,9 +66,8 @@ class ImportTracker:
             return False
         return True
 
-    def get_packages_data_in_current_process(self, code_str, work_directory=None):
-        if work_directory is not None:
-            os.chdir(work_directory)
+    def get_packages_data_in_current_process(self, code_str, node_identifier):
+        print(f'Collecting {node_identifier} "{code_str}"')
         modules_before = sys.modules.copy()
         a = exec(code_str)
         modules_after = sys.modules.copy()
@@ -101,61 +85,89 @@ class ImportTracker:
                 record.append(module.__version__)
             except:
                 record.append(None)
+            record.append(node_identifier)
             records.append(record)
-        import sqlite3
-        db_path = self.output_directory / 'modules.db'
-        should_init = not db_path.exists()
-        conn = sqlite3.connect(self.output_directory / 'modules.db')
-        if should_init:
-            schema_path = Path(__file__).parent / 'schema.sql'
-            with open(schema_path) as schema_file:
-                conn.executescript(schema_file.read())
-        query = """INSERT INTO IMPORT_DATA(root, module, path, version) VALUES (?,?,?,?);"""
+        conn = self.get_connection()
+        query = """INSERT INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?);"""
         c = conn.cursor()
         c.executemany(query, records)
         conn.commit()
 
-    def dump_package_data(self, code_str, working_directory=None):
-        args = (code_str, working_directory)
+    def get_connection(self):
+        db_path = self.get_db_path()
+        should_init = not db_path.exists()
+        conn = sqlite3.connect(self.get_db_path())
+        if should_init:
+            schema_path = Path(__file__).parent / 'schema.sql'
+            with open(schema_path) as schema_file:
+                conn.executescript(schema_file.read())
+        return conn
+
+    def insert_code_str(self, code_str):
+        try:
+            with self.get_connection() as conn:
+                c = conn.cursor()
+                query = """INSERT INTO NODES(code_str) VALUES (?)"""
+                c.execute(query, [code_str])
+                conn.commit()
+                return c.lastrowid
+        except IntegrityError as e:
+            return -1
+
+    def get_file_for_module_name(self, module_str):
+        query = """
+SELECT path
+FROM IMPORT_DATA
+WHERE module = :module"""
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            c.execute(query, {'module': module_str})
+            row = c.fetchone()
+            if row is None:
+                return None
+            return row[0]
+
+    def get_db_path(self):
+        return self.output_directory / 'modules.db'
+
+    def dump_package_data(self, code_str, node_id):
+        args = (code_str, node_id)
         p = Process(target=self.get_packages_data_in_current_process, args=args)
         p.start()
         p.join()
 
-    def find_import_tree(self, code_str):
-        root_hash = self.hash_function(code_str)
-        hashes = [root_hash]
-        code_strs = [code_str]
-        self.dump_package_data(code_str, root_hash)
-        traversal_data = TraversalData()
-        traversal_data.node_name_to_code_str[root_hash] = code_str
-        new_hashes, new_code_strs = self.traverse_ast_imports(code_str, root_hash, traversal_data)
-        hashes += new_hashes
-        code_strs += new_code_strs
-        res = {
-            'hashes': hashes,
-            'code_strs': code_strs
-        }
-        import pandas as pd
-        df = pd.DataFrame(res)
-        df.to_csv(self.output_directory / '_nodes_mapping.csv')
+    def read_source_file(self, path_to_module):
+        try:
+            with open(path_to_module) as in_file:
+                return in_file.read()
+        except UnicodeError:
+            return None
 
-    def traverse_ast_imports(self, code_str, code_hash, traversal_data):
-        ast_module = ast.parse(code_str)
+    def dump_tree_import_froms_stmt(self, import_froms_str):
+        root_id = self.insert_code_str(import_froms_str)
+        if root_id < 0:
+            print(f'Already inserted {root_id} "{import_froms_str}"')
+            return
+        self.dump_package_data(import_froms_str, root_id)
+        import_froms_stmt = ast.parse(import_froms_str).body[0]
+        path_to_module = self.get_file_for_module_name(import_froms_stmt.module)
+        if path_to_module is None:
+            print(f'Built-in {root_id} "{import_froms_str}"')
+            return
+        path_to_module = Path(path_to_module)
+        source = self.read_source_file(path_to_module)
+        if source is None:
+            print(f'Not Python {root_id} "{import_froms_str}"')
+            return
         visitor = AstImportsVisitor()
-        visitor.visit(ast_module)
-        for import_from_stmt in visitor.import_froms:
-            child_str = astunparse.unparse(import_from_stmt).strip()
-            child_hash = self.hash_function(child_str)
-            traversal_data.adjacency_list[code_hash].append(child_hash)
-            traversal_state = traversal_data.nodes.get(child_hash)
-            if not should_traverse(traversal_state):
-                continue
-            traversal_data.nodes[child_hash] = 'in_process'
-            working_directory = get_working_directory(import_from_stmt)
-            self.dump_package_data(child_str, child_hash, working_directory)
-            self.traverse_ast_imports(child_str, child_hash, traversal_data)
-            traversal_data.nodes[child_hash] = 'processed'
-
-
-
-
+        visitor.visit(ast.parse(source))
+        for import_froms_stmt in visitor.import_froms:
+            import_froms_str = astunparse.unparse(import_froms_stmt).strip()
+            raw_module_str = import_froms_str.split()[1]
+            n_dots = get_number_of_relative_step_backs(raw_module_str)
+            is_relative_import = n_dots > 0
+            if is_relative_import:
+                print('Relative!')
+            else:
+                print('Absolute!')
+                self.dump_tree_import_froms_stmt(import_froms_str)
