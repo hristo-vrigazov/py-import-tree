@@ -1,0 +1,30 @@
+
+CREATE TABLE IMPORT_DATA (
+    id INTEGER PRIMARY KEY ,
+    root TEXT,
+    module TEXT,
+    path TEXT,
+    version TEXT
+);
+
+CREATE TABLE NODES (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    code_str TEXT
+);
+
+CREATE TABLE ADJACENCY_TABLE (
+    id INTEGER PRIMARY KEY,
+    parent_id INTEGER NOT NULL ,
+    child_id INTEGER NOT NULL ,
+    FOREIGN KEY (parent_id) REFERENCES NODES(id),
+    FOREIGN KEY (child_id) REFERENCES NODES(id)
+);
+
+CREATE TABLE NODE_TO_IMPORT_DATA (
+    id INTEGER PRIMARY KEY ,
+    node_id INTEGER NOT NULL ,
+    import_data_id INTEGER NOT NULL ,
+    FOREIGN KEY (node_id) REFERENCES NODES(id),
+    FOREIGN KEY (import_data_id) REFERENCES IMPORT_DATA(id)
+)
