@@ -6,7 +6,7 @@ CREATE TABLE NODES (
 CREATE TABLE IMPORT_DATA (
     id INTEGER PRIMARY KEY ,
     root TEXT,
-    module TEXT,
+    module TEXT UNIQUE ,
     path TEXT,
     version TEXT,
     node_id INTEGER NOT NULL,

@@ -71,7 +71,7 @@ class ImportTracker:
         modules_before = sys.modules.copy()
         a = exec(code_str)
         modules_after = sys.modules.copy()
-        records = []
+        conn = self.get_connection()
         for key, module in modules_after.items():
             if not self.should_be_tracked(key, module, modules_before):
                 continue
@@ -86,12 +86,10 @@ class ImportTracker:
             except:
                 record.append(None)
             record.append(node_identifier)
-            records.append(record)
-        conn = self.get_connection()
-        query = """INSERT INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?);"""
-        c = conn.cursor()
-        c.executemany(query, records)
-        conn.commit()
+            query = """INSERT INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?)"""
+            c = conn.cursor()
+            c.execute(query, record)
+            conn.commit()
 
     def get_connection(self):
         db_path = self.get_db_path()
@@ -143,21 +141,22 @@ WHERE module = :module"""
         except UnicodeError:
             return None
 
-    def dump_tree_import_froms_stmt(self, import_froms_str):
-        root_id = self.insert_code_str(import_froms_str)
-        if root_id < 0:
-            print(f'Already inserted {root_id} "{import_froms_str}"')
+    def dump_tree_import_froms_stmt(self, import_froms_str, parent_node_id=None):
+        node_id = self.insert_code_str(import_froms_str)
+        if node_id < 0:
+            print(f'Already inserted {node_id} "{import_froms_str}"')
             return
-        self.dump_package_data(import_froms_str, root_id)
+        self.store_arc(parent_node_id, node_id)
+        self.dump_package_data(import_froms_str, node_id)
         import_froms_stmt = ast.parse(import_froms_str).body[0]
         path_to_module = self.get_file_for_module_name(import_froms_stmt.module)
         if path_to_module is None:
-            print(f'Built-in {root_id} "{import_froms_str}"')
+            print(f'Built-in {node_id} "{import_froms_str}"')
             return
         path_to_module = Path(path_to_module)
         source = self.read_source_file(path_to_module)
         if source is None:
-            print(f'Not Python {root_id} "{import_froms_str}"')
+            print(f'Not Python {node_id} "{import_froms_str}"')
             return
         visitor = AstImportsVisitor()
         visitor.visit(ast.parse(source))
@@ -168,6 +167,18 @@ WHERE module = :module"""
             is_relative_import = n_dots > 0
             if is_relative_import:
                 print('Relative!')
+                # TODO
+                # raise NotImplementedError('We should compute how it would look as absolute import')
             else:
                 print('Absolute!')
-                self.dump_tree_import_froms_stmt(import_froms_str)
+                self.dump_tree_import_froms_stmt(import_froms_str, node_id)
+        #TODO handle regular imports
+
+    def store_arc(self, parent_node_id, child_node_id):
+        if parent_node_id is None:
+            return
+        conn = self.get_connection()
+        query = """INSERT INTO ADJACENCY_TABLE(parent_id, child_id) VALUES (?,?)"""
+        c = conn.cursor()
+        c.execute(query, (parent_node_id, child_node_id))
+        conn.commit()
