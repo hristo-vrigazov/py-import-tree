@@ -71,6 +71,7 @@ class ImportTracker:
         modules_before = sys.modules.copy()
         a = exec(code_str)
         modules_after = sys.modules.copy()
+        print(f'Collecting after {node_identifier} "{code_str}"')
         conn = self.get_connection()
         for key, module in modules_after.items():
             if not self.should_be_tracked(key, module, modules_before):
@@ -86,10 +87,11 @@ class ImportTracker:
             except:
                 record.append(None)
             record.append(node_identifier)
-            query = """INSERT INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?)"""
+            query = """INSERT OR IGNORE INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?)"""
             c = conn.cursor()
             c.execute(query, record)
             conn.commit()
+        print(f'Exiting {node_identifier} "{code_str}"')
 
     def get_connection(self):
         db_path = self.get_db_path()
@@ -160,19 +162,27 @@ WHERE module = :module"""
             return
         visitor = AstImportsVisitor()
         visitor.visit(ast.parse(source))
-        for import_froms_stmt in visitor.import_froms:
-            import_froms_str = astunparse.unparse(import_froms_stmt).strip()
-            raw_module_str = import_froms_str.split()[1]
-            n_dots = get_number_of_relative_step_backs(raw_module_str)
+        for child_stmt in visitor.import_froms:
+            child_import_str = astunparse.unparse(child_stmt).strip()
+            raw_module_str = child_import_str.split()[1]
+            n_dots = child_stmt.level
             is_relative_import = n_dots > 0
             if is_relative_import:
-                print('Relative!')
-                # TODO
-                # raise NotImplementedError('We should compute how it would look as absolute import')
+                parent_modules = import_froms_stmt.module.split('.')
+                first_from_part = parent_modules[:len(parent_modules) - n_dots + 1]
+                second_from_part = raw_module_str[n_dots:].split('.')
+                from_part = '.'.join(filter(lambda x: len(x) > 0, first_from_part + second_from_part))
+                print(f'Relative "{import_froms_str}" "{child_import_str}" | {from_part}')
+                child_stmt.module = from_part
+                child_stmt.level = 0
+                child_import_str = astunparse.unparse(child_stmt).strip()
+                print(f'Transformed: "{child_import_str}"')
+                self.dump_tree_import_froms_stmt(child_import_str, node_id)
             else:
                 print('Absolute!')
-                self.dump_tree_import_froms_stmt(import_froms_str, node_id)
+                self.dump_tree_import_froms_stmt(child_import_str, node_id)
         #TODO handle regular imports
+        #TODO: store references to the code (file, line number)
 
     def store_arc(self, parent_node_id, child_node_id):
         if parent_node_id is None:
