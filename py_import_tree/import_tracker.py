@@ -143,7 +143,7 @@ WHERE module = :module"""
         except UnicodeError:
             return None
 
-    def dump_tree_import_froms_stmt(self, import_froms_str, parent_node_id=None):
+    def dump_tree_import_froms_stmt(self, import_froms_str, parent_node_id=None, level=0):
         node_id = self.insert_code_str(import_froms_str)
         if node_id < 0:
             print(f'Already inserted {node_id} "{import_froms_str}"')
@@ -177,10 +177,10 @@ WHERE module = :module"""
                 child_stmt.level = 0
                 child_import_str = astunparse.unparse(child_stmt).strip()
                 print(f'Transformed: "{child_import_str}"')
-                self.dump_tree_import_froms_stmt(child_import_str, node_id)
+                self.dump_tree_import_froms_stmt(child_import_str, node_id, level + 1)
             else:
                 print('Absolute!')
-                self.dump_tree_import_froms_stmt(child_import_str, node_id)
+                self.dump_tree_import_froms_stmt(child_import_str, node_id, level + 1)
         #TODO handle regular imports
         #TODO: store references to the code (file, line number)
 
