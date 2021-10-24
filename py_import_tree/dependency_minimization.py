@@ -5,7 +5,7 @@ def get_eff_name(alias):
     return alias.asname if alias.asname is not None else alias.name
 
 
-class FunctionDep(ast.NodeVisitor):
+class DefinitionTracer(ast.NodeVisitor):
 
     def __init__(self):
         self.function_definitions = []
@@ -14,7 +14,6 @@ class FunctionDep(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node):
         self.function_definitions.append(node)
-        self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
         for alias in node.names:
