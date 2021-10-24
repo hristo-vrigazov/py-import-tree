@@ -38,9 +38,13 @@ class RejectingVisitor(ast.NodeVisitor):
         self.used = []
 
     def visit_Name(self, name):
-        # TODO: track if in scope
-        if (name.id in self.imported_names) and name.lineno > self.imported_names[name.id].lineno:
-            self.used.append(name)
+        if name.id not in self.imported_names:
+            self.generic_visit(name)
+            return
+        if name.lineno < self.imported_names[name.id].lineno:
+            self.generic_visit(name)
+            return
+        self.used.append(name)
 
     def get_unused_import_names(self):
         used_set = set(u.id for u in self.used)
@@ -49,3 +53,17 @@ class RejectingVisitor(ast.NodeVisitor):
 
     def get_used_import_names(self):
         return set(u.id for u in self.used)
+
+
+def get_function_and_class_import_dependencies(source):
+    module = ast.parse(source)
+    tracer = DefinitionTracer()
+    tracer.visit(module)
+    res = {}
+    for definitions in [tracer.function_definitions, tracer.class_definitions]:
+        for definition in definitions:
+            rejecting_vistor = RejectingVisitor(tracer.imported_names)
+            rejecting_vistor.visit(definition)
+            res[definition] = rejecting_vistor.get_used_import_names()
+    return res, tracer.imported_names
+
