@@ -6,19 +6,10 @@ CREATE TABLE NODES (
 CREATE TABLE IMPORT_DATA (
     id INTEGER PRIMARY KEY ,
     root TEXT,
-    module TEXT UNIQUE ,
+    module TEXT,
     path TEXT,
     version TEXT,
     node_id INTEGER NOT NULL,
     FOREIGN KEY(node_id) REFERENCES NODES(id)
-);
-
-
-CREATE TABLE ADJACENCY_TABLE (
-    id INTEGER PRIMARY KEY,
-    parent_id INTEGER NOT NULL ,
-    child_id INTEGER NOT NULL ,
-    FOREIGN KEY (parent_id) REFERENCES NODES(id),
-    FOREIGN KEY (child_id) REFERENCES NODES(id)
 );
 

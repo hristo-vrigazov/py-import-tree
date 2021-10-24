@@ -2,10 +2,11 @@ import ast
 import os
 import sqlite3
 import sys
+from copy import copy
 from multiprocessing import Process
 from pathlib import Path
 from sqlite3 import IntegrityError
-from typing import Union
+from typing import Union, List
 
 import astunparse
 from stdlib_list import stdlib_list
@@ -16,31 +17,82 @@ def get_root_module(key):
     return '-'.join(res.split('_'))
 
 
+class Wrapper:
+
+    def get_root(self):
+        raise NotImplementedError()
+
+    def get_module(self):
+        raise NotImplementedError()
+
+    def get_statement(self):
+        raise NotImplementedError()
+
+
+class ImportWrapper(Wrapper):
+
+    def __init__(self, import_stmt: ast.Import, name_idx: int):
+        self.import_stmt = import_stmt
+        self.name_idx = name_idx
+
+    def get_root(self):
+        pass
+
+    def get_module(self):
+        pass
+
+    def get_statement(self):
+        res = copy(self.import_stmt)
+        res.names = [self.import_stmt.names[self.name_idx]]
+        return res
+
+
+class ImportFromWrapper(Wrapper):
+
+    def __init__(self, import_from_stmt: ast.ImportFrom, name_idx: int):
+        self.import_from_stmt = import_from_stmt
+        self.name_idx = name_idx
+
+    def get_root(self):
+        pass
+
+    def get_module(self):
+        pass
+
+    def get_statement(self):
+        res = copy(self.import_from_stmt)
+        res.names = [self.import_from_stmt.names[self.name_idx]]
+        return res
+
+
 class AstImportsVisitor(ast.NodeVisitor):
 
     def __init__(self):
-        self.imports = []
-        self.import_froms = []
+        self.import_wrappers = []
 
     def visit_Import(self, node: ast.Import):
-        self.imports.append(node)
+        for i in range(len(node.names)):
+            self.import_wrappers.append(ImportWrapper(node, i))
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        self.import_froms.append(node)
+        for i in range(len(node.names)):
+            self.import_wrappers.append(ImportFromWrapper(node, i))
 
 
-def get_number_of_relative_step_backs(raw_module_str):
-    n = 0
-    for i in range(len(raw_module_str)):
-        if raw_module_str[i] != '.':
-            return n
-        n += 1
-    return n
+def read_source_file(path_to_module):
+    try:
+        with open(path_to_module) as in_file:
+            return in_file.read()
+    except UnicodeError:
+        return None
 
 
 class ImportTracker:
 
-    def __init__(self, output_directory: Union[str, Path], blacklisting_function=None):
+    def __init__(self, packages_to_keep_traversing: List[str],
+                 output_directory: Union[str, Path],
+                 blacklisting_function=None):
+        self.packages_to_keep_traversing = packages_to_keep_traversing
         self.output_directory = Path(output_directory)
         self.output_directory.mkdir(exist_ok=True)
         self.stdlib_packages_set = set(stdlib_list())
@@ -136,59 +188,14 @@ WHERE module = :module"""
         p.start()
         p.join()
 
-    def read_source_file(self, path_to_module):
-        try:
-            with open(path_to_module) as in_file:
-                return in_file.read()
-        except UnicodeError:
-            return None
-
-    def dump_tree_import_froms_stmt(self, import_froms_str, parent_node_id=None, level=0):
-        node_id = self.insert_code_str(import_froms_str)
-        if node_id < 0:
-            print(f'Already inserted {node_id} "{import_froms_str}"')
-            return
-        self.store_arc(parent_node_id, node_id)
-        self.dump_package_data(import_froms_str, node_id)
-        import_froms_stmt = ast.parse(import_froms_str).body[0]
-        path_to_module = self.get_file_for_module_name(import_froms_stmt.module)
-        if path_to_module is None:
-            print(f'Built-in {node_id} "{import_froms_str}"')
-            return
-        path_to_module = Path(path_to_module)
-        source = self.read_source_file(path_to_module)
-        if source is None:
-            print(f'Not Python {node_id} "{import_froms_str}"')
-            return
+    def dump_external_dependencies(self, code_str):
         visitor = AstImportsVisitor()
-        visitor.visit(ast.parse(source))
-        for child_stmt in visitor.import_froms:
-            child_import_str = astunparse.unparse(child_stmt).strip()
-            raw_module_str = child_import_str.split()[1]
-            n_dots = child_stmt.level
-            is_relative_import = n_dots > 0
-            if is_relative_import:
-                parent_modules = import_froms_stmt.module.split('.')
-                first_from_part = parent_modules[:len(parent_modules) - n_dots + 1]
-                second_from_part = raw_module_str[n_dots:].split('.')
-                from_part = '.'.join(filter(lambda x: len(x) > 0, first_from_part + second_from_part))
-                print(f'Relative "{import_froms_str}" "{child_import_str}" | {from_part}')
-                child_stmt.module = from_part
-                child_stmt.level = 0
-                child_import_str = astunparse.unparse(child_stmt).strip()
-                print(f'Transformed: "{child_import_str}"')
-                self.dump_tree_import_froms_stmt(child_import_str, node_id, level + 1)
-            else:
-                print('Absolute!')
-                self.dump_tree_import_froms_stmt(child_import_str, node_id, level + 1)
-        #TODO handle regular imports
-        #TODO: store references to the code (file, line number)
+        visitor.visit(ast.parse(code_str))
+        for wrapper in visitor.import_wrappers:
+            self.dump_external_dependencies_of_stmt(wrapper)
 
-    def store_arc(self, parent_node_id, child_node_id):
-        if parent_node_id is None:
-            return
-        conn = self.get_connection()
-        query = """INSERT INTO ADJACENCY_TABLE(parent_id, child_id) VALUES (?,?)"""
-        c = conn.cursor()
-        c.execute(query, (parent_node_id, child_node_id))
-        conn.commit()
+    def dump_external_dependencies_of_stmt(self, import_wrapper: Wrapper):
+        code_str = astunparse.unparse(import_wrapper.get_statement()).strip()
+        node_id = self.insert_code_str(code_str)
+        self.dump_package_data(code_str, node_id)
+
