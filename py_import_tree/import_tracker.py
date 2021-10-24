@@ -19,12 +19,6 @@ def get_root_module(key):
 
 class Wrapper:
 
-    def get_root(self):
-        raise NotImplementedError()
-
-    def get_module(self):
-        raise NotImplementedError()
-
     def get_statement(self):
         raise NotImplementedError()
 
@@ -34,12 +28,6 @@ class ImportWrapper(Wrapper):
     def __init__(self, import_stmt: ast.Import, name_idx: int):
         self.import_stmt = import_stmt
         self.name_idx = name_idx
-
-    def get_root(self):
-        pass
-
-    def get_module(self):
-        pass
 
     def get_statement(self):
         res = copy(self.import_stmt)
@@ -53,30 +41,63 @@ class ImportFromWrapper(Wrapper):
         self.import_from_stmt = import_from_stmt
         self.name_idx = name_idx
 
-    def get_root(self):
-        pass
-
-    def get_module(self):
-        pass
-
     def get_statement(self):
         res = copy(self.import_from_stmt)
         res.names = [self.import_from_stmt.names[self.name_idx]]
         return res
 
 
-class AstImportsVisitor(ast.NodeVisitor):
+def get_eff_name(alias):
+    return alias.asname if alias.asname is not None else alias.name
+
+
+class ImportsAndDefinitionsVisitor(ast.NodeVisitor):
 
     def __init__(self):
-        self.import_wrappers = []
+        self.import_wrappers = {}
+        self.definitions = []
+
+    def store_import(self, node, cls):
+        for i, alias in enumerate(node.names):
+            eff_name = get_eff_name(alias)
+            self.import_wrappers[eff_name] = (cls(node, i))
+        self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import):
-        for i in range(len(node.names)):
-            self.import_wrappers.append(ImportWrapper(node, i))
+        self.store_import(node, ImportWrapper)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        for i in range(len(node.names)):
-            self.import_wrappers.append(ImportFromWrapper(node, i))
+        self.store_import(node, ImportFromWrapper)
+
+    def visit_FunctionDef(self, node):
+        self.definitions.append(node)
+
+    def visit_ClassDef(self, node):
+        self.definitions.append(node)
+
+
+class RejectingVisitor(ast.NodeVisitor):
+
+    def __init__(self, imported_names):
+        self.imported_names = imported_names
+        self.used = []
+
+    def visit_Name(self, name):
+        if name.id not in self.imported_names:
+            self.generic_visit(name)
+            return
+        if name.lineno < self.imported_names[name.id].get_statement().lineno:
+            self.generic_visit(name)
+            return
+        self.used.append(name)
+
+    def get_unused_import_names(self):
+        used_set = set(u.id for u in self.used)
+        imported_set = set(self.imported_names.keys())
+        return imported_set.difference(used_set)
+
+    def get_used_import_names(self):
+        return [self.imported_names[u.id] for u in self.used]
 
 
 def read_source_file(path_to_module):
@@ -156,15 +177,19 @@ class ImportTracker:
         return conn
 
     def insert_code_str(self, code_str):
-        try:
-            with self.get_connection() as conn:
-                c = conn.cursor()
-                query = """INSERT INTO NODES(code_str) VALUES (?)"""
-                c.execute(query, [code_str])
-                conn.commit()
-                return c.lastrowid
-        except IntegrityError as e:
-            return -1
+        return self.insert_unique('IMPORTS', 'code_str', code_str)
+
+    def insert_filename(self, filename):
+        return self.insert_unique('FILENAMES', 'path', filename)
+
+    def insert_unique(self, table_name, col_name, value):
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            query = f"""INSERT OR IGNORE INTO {table_name}({col_name}) VALUES (?)"""
+            print(query, [value])
+            c.execute(query, [value])
+            conn.commit()
+            return c.lastrowid
 
     def get_file_for_module_name(self, module_str):
         query = """
@@ -188,14 +213,44 @@ WHERE module = :module"""
         p.start()
         p.join()
 
-    def dump_external_dependencies(self, code_str):
-        visitor = AstImportsVisitor()
+    def dump_external_dependencies(self, filename, code_str):
+        self.insert_filename(filename)
+        visitor = ImportsAndDefinitionsVisitor()
         visitor.visit(ast.parse(code_str))
-        for wrapper in visitor.import_wrappers:
-            self.dump_external_dependencies_of_stmt(wrapper)
+        for key, wrapper in visitor.import_wrappers.items():
+            code_str = astunparse.unparse(wrapper.get_statement()).strip()
+            self.dump_external_dependencies_of_stmt(code_str)
+            self.store_arc('FILENAMES_TO_IMPORTS', 'filename_path', 'import_code_str', filename, code_str)
+        for definition in visitor.definitions:
+            definition_id = self.insert_definition(definition, filename)
+            rejecting_vistor = RejectingVisitor(visitor.import_wrappers)
+            rejecting_vistor.visit(definition)
+            for wrapper in rejecting_vistor.get_used_import_names():
+                code_str = astunparse.unparse(wrapper.get_statement()).strip()
+                self.store_arc('DEFINITIONS_TO_IMPORTS', 'definition_id', 'import_code_str', definition_id, code_str)
 
-    def dump_external_dependencies_of_stmt(self, import_wrapper: Wrapper):
-        code_str = astunparse.unparse(import_wrapper.get_statement()).strip()
+    def dump_external_dependencies_of_stmt(self, code_str):
         node_id = self.insert_code_str(code_str)
         self.dump_package_data(code_str, node_id)
 
+    def store_arc(self, table_name, col0, col1, val0, val1):
+        conn = self.get_connection()
+        query = f"""INSERT INTO {table_name}({col0}, {col1}) VALUES (?,?)"""
+        c = conn.cursor()
+        c.execute(query, (val0, val1))
+        conn.commit()
+
+    def insert_definition(self, definition, filename):
+        with self.get_connection() as conn:
+            c = conn.cursor()
+            query = f"""
+INSERT OR IGNORE INTO DEFINITIONS(type, name, start_no, end_no, filename_path) 
+VALUES (?, ?, ?, ?, ?)
+"""
+            c.execute(query, [str(type(definition).__name__),
+                              definition.name,
+                              definition.lineno,
+                              definition.end_lineno,
+                              filename])
+            conn.commit()
+            return c.lastrowid
