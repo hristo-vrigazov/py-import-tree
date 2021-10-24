@@ -16,15 +16,15 @@ class DefinitionTracer(ast.NodeVisitor):
         self.function_definitions.append(node)
 
     def visit_ImportFrom(self, node):
-        for alias in node.names:
+        for i, alias in enumerate(node.names):
             eff_name = get_eff_name(alias)
-            self.imported_names[eff_name] = node
+            self.imported_names[eff_name] = (node, i)
         self.generic_visit(node)
 
     def visit_Import(self, node):
-        for alias in node.names:
+        for i, alias in enumerate(node.names):
             eff_name = get_eff_name(alias)
-            self.imported_names[eff_name] = node
+            self.imported_names[eff_name] = (node, i)
         self.generic_visit(node)
 
     def visit_ClassDef(self, node):
@@ -41,7 +41,7 @@ class RejectingVisitor(ast.NodeVisitor):
         if name.id not in self.imported_names:
             self.generic_visit(name)
             return
-        if name.lineno < self.imported_names[name.id].lineno:
+        if name.lineno < self.imported_names[name.id][0].lineno:
             self.generic_visit(name)
             return
         self.used.append(name)
