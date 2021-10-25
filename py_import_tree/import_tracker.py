@@ -1,11 +1,9 @@
 import ast
-import os
 import sqlite3
 import sys
 from copy import copy
 from multiprocessing import Process
 from pathlib import Path
-from sqlite3 import IntegrityError
 from typing import Union, List
 
 import astunparse
@@ -110,10 +108,8 @@ def read_source_file(path_to_module):
 
 class ImportTracker:
 
-    def __init__(self, packages_to_keep_traversing: List[str],
-                 output_directory: Union[str, Path],
+    def __init__(self, output_directory: Union[str, Path],
                  blacklisting_function=None):
-        self.packages_to_keep_traversing = packages_to_keep_traversing
         self.output_directory = Path(output_directory)
         self.output_directory.mkdir(exist_ok=True)
         self.stdlib_packages_set = set(stdlib_list())
@@ -186,7 +182,6 @@ class ImportTracker:
         with self.get_connection() as conn:
             c = conn.cursor()
             query = f"""INSERT OR IGNORE INTO {table_name}({col_name}) VALUES (?)"""
-            print(query, [value])
             c.execute(query, [value])
             conn.commit()
             return c.lastrowid
@@ -254,3 +249,13 @@ VALUES (?, ?, ?, ?, ?)
                               filename])
             conn.commit()
             return c.lastrowid
+
+    def load_as_dataframes(self):
+        import pandas as pd
+        conn = self.get_connection()
+        table_names = ['IMPORTS', 'IMPORT_DATA', 'FILENAMES', 'DEFINITIONS',
+                       'DEFINITIONS_TO_IMPORTS', 'FILENAMES_TO_IMPORTS']
+        res = {}
+        for table_name in table_names:
+            res[table_name] = pd.read_sql_query(f'SELECT * FROM {table_name}', conn)
+        return res
