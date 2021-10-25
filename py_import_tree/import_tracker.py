@@ -230,10 +230,7 @@ WHERE module = :module"""
         visitor.visit(ast.parse(code_str))
         for key, wrapper in visitor.import_wrappers.items():
             code_str = astunparse.unparse(wrapper.get_statement()).strip()
-            try:
-                self.dump_external_dependencies_of_stmt(code_str)
-            except IntegrityError:
-                print(f'Code string "{code_str}" has already been traversed, skipping.')
+            self.dump_external_dependencies_of_stmt(code_str)
             self.store_arc('FILENAMES_TO_IMPORTS', 'filename_path', 'import_code_str', filename, code_str)
         for definition in visitor.definitions:
             definition_id = self.insert_definition(definition, filename)
@@ -244,7 +241,11 @@ WHERE module = :module"""
                 self.store_arc('DEFINITIONS_TO_IMPORTS', 'definition_id', 'import_code_str', definition_id, code_str)
 
     def dump_external_dependencies_of_stmt(self, code_str):
-        node_id = self.insert_code_str(code_str)
+        try:
+            node_id = self.insert_code_str(code_str)
+        except IntegrityError:
+            print(f'Code string "{code_str}" has already been traversed, skipping.')
+            return 
         self.dump_package_data(code_str, node_id)
 
     def store_arc(self, table_name, col0, col1, val0, val1):
