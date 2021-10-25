@@ -1,9 +1,11 @@
 import ast
 import sqlite3
 import sys
+from collections import defaultdict
 from copy import copy
 from multiprocessing import Process
 from pathlib import Path
+from sqlite3 import IntegrityError
 from typing import Union, List
 
 import astunparse
@@ -181,7 +183,7 @@ class ImportTracker:
     def insert_unique(self, table_name, col_name, value):
         with self.get_connection() as conn:
             c = conn.cursor()
-            query = f"""INSERT OR IGNORE INTO {table_name}({col_name}) VALUES (?)"""
+            query = f"""INSERT INTO {table_name}({col_name}) VALUES (?)"""
             c.execute(query, [value])
             conn.commit()
             return c.lastrowid
@@ -208,13 +210,30 @@ WHERE module = :module"""
         p.start()
         p.join()
 
-    def dump_external_dependencies(self, filename, code_str):
-        self.insert_filename(filename)
+    def dump_external_dependencies_for_directory(self, directory: Union[str, Path]):
+        directory = Path(directory)
+        for filename in directory.glob('**/*.py'):
+            with open(filename) as in_file:
+                self.dump_external_dependencies_for_filename(str(filename), in_file.read())
+
+    def dump_external_dependencies_for_filenames(self, filenames, code_strs):
+        for i, filename in enumerate(filenames):
+            self.dump_external_dependencies_for_filename(filename, code_strs[i])
+
+    def dump_external_dependencies_for_filename(self, filename, code_str):
+        try:
+            self.insert_filename(filename)
+        except IntegrityError:
+            print(f'Filename {filename} has already been traversed, skipping.')
+            return
         visitor = ImportsAndDefinitionsVisitor()
         visitor.visit(ast.parse(code_str))
         for key, wrapper in visitor.import_wrappers.items():
             code_str = astunparse.unparse(wrapper.get_statement()).strip()
-            self.dump_external_dependencies_of_stmt(code_str)
+            try:
+                self.dump_external_dependencies_of_stmt(code_str)
+            except IntegrityError:
+                print(f'Code string "{code_str}" has already been traversed, skipping.')
             self.store_arc('FILENAMES_TO_IMPORTS', 'filename_path', 'import_code_str', filename, code_str)
         for definition in visitor.definitions:
             definition_id = self.insert_definition(definition, filename)
