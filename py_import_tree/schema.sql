@@ -8,8 +8,8 @@ CREATE TABLE IMPORT_DATA (
     module TEXT,
     path TEXT,
     version TEXT,
-    node_id TEXT NOT NULL,
-    FOREIGN KEY(node_id) REFERENCES IMPORTS(code_str)
+    code_str TEXT NOT NULL,
+    FOREIGN KEY(code_str) REFERENCES IMPORTS(code_str)
 );
 
 CREATE TABLE FILENAMES (

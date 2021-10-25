@@ -1,6 +1,7 @@
 import ast
 import sqlite3
 import sys
+import traceback
 from collections import defaultdict
 from copy import copy
 from multiprocessing import Process
@@ -138,30 +139,34 @@ class ImportTracker:
         return True
 
     def get_packages_data_in_current_process(self, code_str, node_identifier):
-        print(f'Collecting {node_identifier} "{code_str}"')
-        modules_before = sys.modules.copy()
-        a = exec(code_str)
-        modules_after = sys.modules.copy()
-        print(f'Collecting after {node_identifier} "{code_str}"')
-        conn = self.get_connection()
-        for key, module in modules_after.items():
-            if not self.should_be_tracked(key, module, modules_before):
-                continue
-            record = [get_root_module(key), key]
-            try:
-                record.append(module.__file__)
-            except:
-                record.append(None)
+        try:
+            print(f'Collecting {node_identifier} "{code_str}"')
+            modules_before = sys.modules.copy()
+            a = exec(code_str)
+            modules_after = sys.modules.copy()
+            print(f'Collecting after {node_identifier} "{code_str}"')
+        except Exception:
+            print(traceback.format_exc())
+            return
+        with self.get_connection() as conn:
+            for key, module in modules_after.items():
+                if not self.should_be_tracked(key, module, modules_before):
+                    continue
+                record = [get_root_module(key), key]
+                try:
+                    record.append(module.__file__)
+                except:
+                    record.append(None)
 
-            try:
-                record.append(module.__version__)
-            except:
-                record.append(None)
-            record.append(node_identifier)
-            query = """INSERT OR IGNORE INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?)"""
-            c = conn.cursor()
-            c.execute(query, record)
-            conn.commit()
+                try:
+                    record.append(module.__version__)
+                except:
+                    record.append(None)
+                record.append(node_identifier)
+                query = """INSERT OR IGNORE INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?)"""
+                c = conn.cursor()
+                c.execute(query, record)
+                conn.commit()
         print(f'Exiting {node_identifier} "{code_str}"')
 
     def get_connection(self):
@@ -182,9 +187,8 @@ class ImportTracker:
 
     def insert_unique(self, table_name, col_name, value):
         with self.get_connection() as conn:
-            c = conn.cursor()
             query = f"""INSERT INTO {table_name}({col_name}) VALUES (?)"""
-            c.execute(query, [value])
+            c = conn.execute(query, [value])
             conn.commit()
             return c.lastrowid
 
@@ -212,12 +216,15 @@ WHERE module = :module"""
 
     def dump_external_dependencies_for_directory(self, directory: Union[str, Path]):
         directory = Path(directory)
-        for filename in directory.glob('**/*.py'):
+        filenames = list(directory.glob('**/*.py'))
+        for i, filename in enumerate(filenames):
             with open(filename) as in_file:
+                print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
                 self.dump_external_dependencies_for_filename(str(filename), in_file.read())
 
     def dump_external_dependencies_for_filenames(self, filenames, code_strs):
         for i, filename in enumerate(filenames):
+            print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
             self.dump_external_dependencies_for_filename(filename, code_strs[i])
 
     def dump_external_dependencies_for_filename(self, filename, code_str):
@@ -242,11 +249,11 @@ WHERE module = :module"""
 
     def dump_external_dependencies_of_stmt(self, code_str):
         try:
-            node_id = self.insert_code_str(code_str)
+            self.insert_code_str(code_str)
         except IntegrityError:
             print(f'Code string "{code_str}" has already been traversed, skipping.')
-            return 
-        self.dump_package_data(code_str, node_id)
+            return
+        self.dump_package_data(code_str, code_str)
 
     def store_arc(self, table_name, col0, col1, val0, val1):
         conn = self.get_connection()
@@ -257,11 +264,11 @@ WHERE module = :module"""
 
     def insert_definition(self, definition, filename):
         with self.get_connection() as conn:
-            c = conn.cursor()
             query = f"""
-INSERT OR IGNORE INTO DEFINITIONS(type, name, start_no, end_no, filename_path) 
+INSERT INTO DEFINITIONS(type, name, start_no, end_no, filename_path) 
 VALUES (?, ?, ?, ?, ?)
 """
+            c = conn.cursor()
             c.execute(query, [str(type(definition).__name__),
                               definition.name,
                               definition.lineno,
