@@ -163,7 +163,7 @@ class ImportTracker:
                 except:
                     record.append(None)
                 record.append(node_identifier)
-                query = """INSERT OR IGNORE INTO IMPORT_DATA(root, module, path, version, node_id) VALUES (?,?,?,?,?)"""
+                query = """INSERT OR IGNORE INTO IMPORT_DATA(root, module, path, version, code_str) VALUES (?,?,?,?,?)"""
                 c = conn.cursor()
                 c.execute(query, record)
                 conn.commit()
@@ -279,10 +279,11 @@ VALUES (?, ?, ?, ?, ?)
 
     def load_as_dataframes(self):
         import pandas as pd
-        conn = self.get_connection()
-        table_names = ['IMPORTS', 'IMPORT_DATA', 'FILENAMES', 'DEFINITIONS',
-                       'DEFINITIONS_TO_IMPORTS', 'FILENAMES_TO_IMPORTS']
-        res = {}
-        for table_name in table_names:
-            res[table_name] = pd.read_sql_query(f'SELECT * FROM {table_name}', conn)
-        return res
+        with self.get_connection() as conn:
+            table_names = ['IMPORTS', 'IMPORT_DATA', 'FILENAMES', 'DEFINITIONS',
+                           'DEFINITIONS_TO_IMPORTS', 'FILENAMES_TO_IMPORTS']
+            res = {}
+            for table_name in table_names:
+                res[table_name] = pd.read_sql_query(f'SELECT * FROM {table_name}', conn)
+            return res
+
