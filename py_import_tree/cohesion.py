@@ -3,6 +3,7 @@ import os
 from copy import copy
 from pathlib import Path
 
+
 def get_package_dir_site_packages(path):
     if path is None:
         return Path('/')
@@ -51,7 +52,7 @@ def cohesion_scores(df_dict):
     actual_weight_dict = df.groupby('filename_path').apply(compute_weight).to_dict()
     df['definition_actual_weight'] = df['filename_path'].map(actual_weight_dict)
     cols = ['id_definition', 'type', 'name', 'start_no', 'end_no', 'filename_path', 'definition_ideal_weight',
-               'definition_actual_weight']
+            'definition_actual_weight']
     definitions_df = df[cols].drop_duplicates()
     ideal = definitions_df['definition_ideal_weight']
     actual = definitions_df['definition_actual_weight']
@@ -59,7 +60,5 @@ def cohesion_scores(df_dict):
     return {
         'full_df': df,
         'definitions_df': definitions_df,
-        'cohesion_score': df['cohesion_score'].mean()
+        'cohesion_score': definitions_df['cohesion_score'].mean()
     }
-
-
