@@ -29,6 +29,7 @@ setup(
     install_requires=["pandas"
                       "numpy",
                       "stdlib_list",
+                      "astunparse",
                       "joblib"],
     extras_require={}
 )
