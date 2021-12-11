@@ -2,12 +2,11 @@ import ast
 import sqlite3
 import sys
 import traceback
-from collections import defaultdict
 from copy import copy
 from multiprocessing import Process
 from pathlib import Path
 from sqlite3 import IntegrityError
-from typing import Union, List
+from typing import Union
 
 import astunparse
 from stdlib_list import stdlib_list

@@ -3,9 +3,12 @@ import os
 from copy import copy
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+
 
 def get_package_dir_site_packages(path):
-    if path is None:
+    if path is None or pd.isna(path):
         return Path('/')
     path = Path(path)
     tmp = copy(path)
@@ -41,7 +44,7 @@ def cohesion_scores(df_dict):
                                                 right_on='definition_id',
                                                 suffixes=('_definition', '_import_df'),
                                                 how='left')
-    df = def_with_imports.merge(res['IMPORT_DATA'], left_on='import_code_str', right_on='code_str')
+    df = def_with_imports.merge(res['IMPORT_DATA'], left_on='import_code_str', right_on='code_str', how='left')
     concrete_path_to_module_path = {path: str(get_package_dir_site_packages(path)) for path in df['path'].unique()}
     df['package_path'] = df['path'].map(concrete_path_to_module_path)
     unique_package_paths = list(set(list(concrete_path_to_module_path.values())))
