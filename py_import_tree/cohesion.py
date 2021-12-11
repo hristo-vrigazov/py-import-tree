@@ -39,9 +39,9 @@ def cohesion_scores(df_dict):
     def_with_imports = res['DEFINITIONS'].merge(res['DEFINITIONS_TO_IMPORTS'],
                                                 left_on='id',
                                                 right_on='definition_id',
-                                                suffixes=('_definition', '_import_df'))
+                                                suffixes=('_definition', '_import_df'),
+                                                how='left')
     df = def_with_imports.merge(res['IMPORT_DATA'], left_on='import_code_str', right_on='code_str')
-    unique_module_paths = df['path'].unique()
     concrete_path_to_module_path = {path: str(get_package_dir_site_packages(path)) for path in df['path'].unique()}
     df['package_path'] = df['path'].map(concrete_path_to_module_path)
     unique_package_paths = list(set(list(concrete_path_to_module_path.values())))
@@ -57,6 +57,7 @@ def cohesion_scores(df_dict):
     ideal = definitions_df['definition_ideal_weight']
     actual = definitions_df['definition_actual_weight']
     definitions_df['cohesion_score'] = ideal / actual
+    definitions_df.loc[definitions_df['definition_actual_weight'] < 1e-4, 'cohesion_score'] = 1.
     return {
         'full_df': df,
         'definitions_df': definitions_df,
