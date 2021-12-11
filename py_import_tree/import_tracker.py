@@ -276,13 +276,6 @@ VALUES (?, ?, ?, ?, ?)
             conn.commit()
             return c.lastrowid
 
-    def load_as_dataframes(self):
-        import pandas as pd
-        with self.get_connection() as conn:
-            table_names = ['IMPORTS', 'IMPORT_DATA', 'FILENAMES', 'DEFINITIONS',
-                           'DEFINITIONS_TO_IMPORTS', 'FILENAMES_TO_IMPORTS']
-            res = {}
-            for table_name in table_names:
-                res[table_name] = pd.read_sql_query(f'SELECT * FROM {table_name}', conn)
-            return res
+
+
 
