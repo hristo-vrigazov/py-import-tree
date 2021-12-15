@@ -30,7 +30,6 @@ setup(
                       "numpy",
                       "stdlib_list",
                       "astunparse",
-                      "deepdiff",
                       "joblib"],
     extras_require={}
 )
