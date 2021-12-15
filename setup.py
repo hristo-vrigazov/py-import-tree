@@ -31,5 +31,8 @@ setup(
                       "stdlib_list",
                       "astunparse",
                       "joblib"],
-    extras_require={}
+    extras_require={},
+    data_files=[
+        ('schema', ['py_import_tree/schema.sql'])
+    ]
 )
