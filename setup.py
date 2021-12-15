@@ -11,7 +11,7 @@ README = (HERE / "README.md").read_text()
 setup(
     name="py_import_tree",
     version=py_import_tree.__version__,
-    description="DNN.Cool: Multi-task learning for Deep Neural Networks (DNN).",
+    description="py_import_tree: A library for analyzing Python's code tree.",
     long_description=README,
     long_description_content_type="text/markdown",
     url="https://github.com/hristo-vrigazov/py-import-tree",
@@ -30,6 +30,7 @@ setup(
                       "numpy",
                       "stdlib_list",
                       "astunparse",
+                      "deepdiff",
                       "joblib"],
     extras_require={}
 )

@@ -1,12 +1,10 @@
 import os
 import sqlite3
-
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
-import numpy as np
 import pandas as pd
 
 
@@ -55,6 +53,33 @@ class ImportTree:
     definitions: pd.DataFrame
     definitions_to_imports: pd.DataFrame
     filenames_to_imports: pd.DataFrame
+
+    def what_if_import_moves(self, from_file: str, import_code_str: str, to_file: str):
+        fi = self.filenames_to_imports.copy()
+        mask = (fi['filename_path'] == from_file) & (fi['import_code_str'] == import_code_str)
+        fi.loc[mask, 'filename_path'] = to_file
+        return ImportTree(
+            imports=self.imports,
+            import_data=self.import_data,
+            filenames=self.filenames,
+            filenames_to_imports=fi,
+            definitions=self.definitions,
+            definitions_to_imports=self.definitions_to_imports
+        )
+
+    def what_if_definition_moves(self, definition_id: int, to_file: str):
+        definitions = self.definitions.copy()
+        definitions_to_imports = self.definitions_to_imports.copy()
+        definitions.loc[definitions['id'] == definition_id, 'filename_path'] = to_file
+        definitions_to_imports = definitions_to_imports[definitions_to_imports['definition_id'] == definition_id]
+        return ImportTree(
+            imports=self.imports,
+            import_data=self.import_data,
+            filenames=self.filenames,
+            filenames_to_imports=self.filenames_to_imports,
+            definitions=definitions,
+            definitions_to_imports=definitions_to_imports
+        )
 
     def compute_cohesion_data(self, weight_func=get_size_of_directory):
         def_with_imports = self.definitions.merge(self.definitions_to_imports,
