@@ -39,10 +39,10 @@ def compute_weight(sub_df):
 
 
 @dataclass
-class CohesionData:
-    cohesion_score: float
-    full_df: pd.DataFrame
-    definitions_df: pd.DataFrame
+class Cohesion:
+    score: float
+    full: pd.DataFrame
+    definitions: pd.DataFrame
 
 
 @dataclass
@@ -67,21 +67,33 @@ class ImportTree:
             definitions_to_imports=self.definitions_to_imports
         )
 
-    def what_if_definition_moves(self, definition_id: int, to_file: str):
+    def what_if_function_moves(self, from_file: str, function_name: str, to_file: str):
+        return self.what_if_definition_moves('FunctionDef', from_file, function_name, to_file)
+
+    def what_if_class_moves(self, from_file: str, class_name: str, to_file: str):
+        return self.what_if_definition_moves('ClassDef', from_file, class_name, to_file)
+
+    def what_if_definition_moves(self, def_type: str, from_file: str, function_name: str, to_file: str):
+        type_m = self.definitions['type'] == def_type
+        file_m = self.definitions['filename_path'] == from_file
+        func_m = self.definitions['name'] == function_name
+        mask = type_m & file_m & func_m
+        definition_id = self.definitions[mask].iloc[0]['id']
+        return self.what_if_definition_id_moves(definition_id, to_file)
+
+    def what_if_definition_id_moves(self, definition_id: int, to_file: str):
         definitions = self.definitions.copy()
-        definitions_to_imports = self.definitions_to_imports.copy()
         definitions.loc[definitions['id'] == definition_id, 'filename_path'] = to_file
-        definitions_to_imports = definitions_to_imports[definitions_to_imports['definition_id'] == definition_id]
         return ImportTree(
             imports=self.imports,
             import_data=self.import_data,
             filenames=self.filenames,
             filenames_to_imports=self.filenames_to_imports,
             definitions=definitions,
-            definitions_to_imports=definitions_to_imports
+            definitions_to_imports=self.definitions_to_imports
         )
 
-    def compute_cohesion_data(self, weight_func=get_size_of_directory):
+    def compute_cohesion(self, weight_func=get_size_of_directory):
         def_with_imports = self.definitions.merge(self.definitions_to_imports,
                                                   left_on='id',
                                                   right_on='definition_id',
@@ -104,9 +116,9 @@ class ImportTree:
         actual = definitions_df['definition_actual_weight']
         definitions_df['cohesion_score'] = ideal / actual
         definitions_df.loc[definitions_df['definition_actual_weight'] < 1e-4, 'cohesion_score'] = 1.
-        return CohesionData(cohesion_score=definitions_df['cohesion_score'].mean(),
-                            definitions_df=definitions_df,
-                            full_df=df)
+        return Cohesion(score=definitions_df['cohesion_score'].mean(),
+                        definitions=definitions_df,
+                        full=df)
 
     @classmethod
     def from_dump(cls, output_directory: Union[str, Path]):
