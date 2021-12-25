@@ -1,10 +1,14 @@
 import os
+import pickle
 import sqlite3
+from collections import defaultdict
 from copy import copy
 from dataclasses import dataclass
+from os import listdir
 from pathlib import Path
 from typing import Union
 
+import numpy as np
 import pandas as pd
 
 
@@ -43,6 +47,23 @@ class Cohesion:
     score: float
     full: pd.DataFrame
     definitions: pd.DataFrame
+
+
+def load_transitive_imports(output_directory):
+    df_data = defaultdict(list)
+    for child in output_directory.iterdir():
+        code_str = child.stem
+        with open(child, 'rb') as in_file:
+            records = pickle.load(in_file)
+            for root, module, path, version, node_identifier in records:
+                df_data['root'].append(root)
+                df_data['module'].append(module)
+                df_data['path'].append(path)
+                df_data['version'].append(version)
+                df_data['code_str'].append(code_str)
+    df = pd.DataFrame(df_data)
+    df['id'] = np.arange(len(df)) + 1
+    return df
 
 
 @dataclass
@@ -125,9 +146,10 @@ class ImportTree:
         output_directory = Path(output_directory)
 
         with sqlite3.connect(output_directory / 'modules.db') as conn:
-            table_names = ['IMPORTS', 'IMPORT_DATA', 'FILENAMES', 'DEFINITIONS',
+            table_names = ['IMPORTS', 'FILENAMES', 'DEFINITIONS',
                            'DEFINITIONS_TO_IMPORTS', 'FILENAMES_TO_IMPORTS']
             res = {}
             for table_name in table_names:
                 res[table_name.lower()] = pd.read_sql_query(f'SELECT * FROM {table_name}', conn)
+            res['import_data'] = load_transitive_imports(output_directory / 'transitive_imports')
             return cls(**res)
