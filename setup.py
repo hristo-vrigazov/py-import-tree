@@ -30,5 +30,8 @@ setup(
                       "numpy",
                       "stdlib_list",
                       "astunparse"],
-    extras_require={}
+    extras_require={},
+    data_files=[
+        ('schema', ['py_import_tree/schema.sql'])
+    ]
 )
