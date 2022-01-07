@@ -115,12 +115,7 @@ class ImportTree:
         )
 
     def compute_cohesion(self, weight_func=get_size_of_directory):
-        def_with_imports = self.definitions.merge(self.definitions_to_imports,
-                                                  left_on='id',
-                                                  right_on='definition_id',
-                                                  suffixes=('_definition', '_import_df'),
-                                                  how='left')
-        df = def_with_imports.merge(self.import_data, left_on='import_code_str', right_on='code_str', how='left')
+        df = self.get_full_df()
         concrete_path_to_module_path = {path: str(get_package_dir_site_packages(path)) for path in df['path'].unique()}
         df['package_path'] = df['path'].map(concrete_path_to_module_path)
         unique_package_paths = list(set(list(concrete_path_to_module_path.values())))
@@ -140,6 +135,15 @@ class ImportTree:
         return Cohesion(score=definitions_df['cohesion_score'].mean(),
                         definitions=definitions_df,
                         full=df)
+
+    def get_full_df(self):
+        def_with_imports = self.definitions.merge(self.definitions_to_imports,
+                                                  left_on='id',
+                                                  right_on='definition_id',
+                                                  suffixes=('_definition', '_import_df'),
+                                                  how='left')
+        df = def_with_imports.merge(self.import_data, left_on='import_code_str', right_on='code_str', how='left')
+        return df
 
     @classmethod
     def from_dump(cls, output_directory: Union[str, Path]):
