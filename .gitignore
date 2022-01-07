@@ -134,3 +134,4 @@ out*.csv
 out
 out_directory
 py_import_tree_results
+out_dnn_cool

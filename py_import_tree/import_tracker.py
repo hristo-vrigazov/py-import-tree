@@ -1,4 +1,5 @@
 import ast
+import pickle
 import sqlite3
 import sys
 import traceback
@@ -108,6 +109,13 @@ def read_source_file(path_to_module):
         return None
 
 
+def join_processes(processes):
+    for process in processes:
+        if process is None:
+            continue
+        process.join()
+
+
 class ImportTracker:
 
     def __init__(self, output_directory: Union[str, Path],
@@ -147,25 +155,26 @@ class ImportTracker:
         except Exception:
             print(traceback.format_exc())
             return
-        with self.get_connection() as conn:
-            for key, module in modules_after.items():
-                if not self.should_be_tracked(key, module, modules_before):
-                    continue
-                record = [get_root_module(key), key]
-                try:
-                    record.append(module.__file__)
-                except:
-                    record.append(None)
+        records = []
+        for key, module in modules_after.items():
+            if not self.should_be_tracked(key, module, modules_before):
+                continue
+            record = [get_root_module(key), key]
+            try:
+                record.append(module.__file__)
+            except:
+                record.append(None)
 
-                try:
-                    record.append(module.__version__)
-                except:
-                    record.append(None)
-                record.append(node_identifier)
-                query = """INSERT OR IGNORE INTO IMPORT_DATA(root, module, path, version, code_str) VALUES (?,?,?,?,?)"""
-                c = conn.cursor()
-                c.execute(query, record)
-                conn.commit()
+            try:
+                record.append(module.__version__)
+            except:
+                record.append(None)
+            record.append(node_identifier)
+            records.append(record)
+        out_path = self.output_directory / f'transitive_imports'
+        out_path.mkdir(exist_ok=True)
+        with open(out_path / f'{code_str}.pkl', 'wb') as out_file:
+            pickle.dump(records, out_file)
         print(f'Exiting {node_identifier} "{code_str}"')
 
     def get_connection(self):
@@ -211,32 +220,41 @@ WHERE module = :module"""
         args = (code_str, node_id)
         p = Process(target=self.get_packages_data_in_current_process, args=args)
         p.start()
-        p.join()
+        return p
 
     def dump_external_dependencies_for_directory(self, directory: Union[str, Path]):
         directory = Path(directory)
         filenames = list(directory.glob('**/*.py'))
+        already_traversed = set()
+        processes = []
         for i, filename in enumerate(filenames):
             with open(filename) as in_file:
                 print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
-                self.dump_external_dependencies_for_filename(str(filename), in_file.read())
+                processes += self.dump_external_dependencies_for_filename(str(filename),
+                                                                          in_file.read(),
+                                                                          already_traversed)
+        join_processes(processes)
 
-    def dump_external_dependencies_for_filenames(self, filenames, code_strs):
+    def dump_external_dependencies_for_filenames(self, filenames, code_strs, already_traversed):
+        processes = []
         for i, filename in enumerate(filenames):
             print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
-            self.dump_external_dependencies_for_filename(filename, code_strs[i])
+            processes += self.dump_external_dependencies_for_filename(filename, code_strs[i], already_traversed)
+        join_processes(processes)
 
-    def dump_external_dependencies_for_filename(self, filename, code_str):
+    def dump_external_dependencies_for_filename(self, filename, code_str, already_traversed):
         try:
             self.insert_filename(filename)
         except IntegrityError:
             print(f'Filename {filename} has already been traversed, skipping.')
-            return
+            return []
         visitor = ImportsAndDefinitionsVisitor()
         visitor.visit(ast.parse(code_str))
+        processes = []
         for key, wrapper in visitor.import_wrappers.items():
             code_str = astunparse.unparse(wrapper.get_statement()).strip()
-            self.dump_external_dependencies_of_stmt(code_str)
+            p = self.dump_external_dependencies_of_stmt(code_str, already_traversed)
+            processes.append(p)
             self.store_arc('FILENAMES_TO_IMPORTS', 'filename_path', 'import_code_str', filename, code_str)
         for definition in visitor.definitions:
             definition_id = self.insert_definition(definition, filename)
@@ -245,14 +263,15 @@ WHERE module = :module"""
             for wrapper in rejecting_vistor.get_used_import_names():
                 code_str = astunparse.unparse(wrapper.get_statement()).strip()
                 self.store_arc('DEFINITIONS_TO_IMPORTS', 'definition_id', 'import_code_str', definition_id, code_str)
+        return processes
 
-    def dump_external_dependencies_of_stmt(self, code_str):
-        try:
-            self.insert_code_str(code_str)
-        except IntegrityError:
+    def dump_external_dependencies_of_stmt(self, code_str, already_traversed):
+        if code_str in already_traversed:
             print(f'Code string "{code_str}" has already been traversed, skipping.')
             return
-        self.dump_package_data(code_str, code_str)
+        p = self.dump_package_data(code_str, code_str)
+        already_traversed.add(code_str)
+        return p
 
     def store_arc(self, table_name, col0, col1, val0, val1):
         conn = self.get_connection()

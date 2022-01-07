@@ -29,8 +29,7 @@ setup(
     install_requires=["pandas",
                       "numpy",
                       "stdlib_list",
-                      "astunparse",
-                      "joblib"],
+                      "astunparse"],
     extras_require={},
     data_files=[
         ('schema', ['py_import_tree/schema.sql'])
