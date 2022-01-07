@@ -4,12 +4,12 @@ import sqlite3
 from collections import defaultdict
 from copy import copy
 from dataclasses import dataclass
-from os import listdir
 from pathlib import Path
 from typing import Union
 
 import numpy as np
 import pandas as pd
+import site
 
 
 def get_package_dir_site_packages(path):
@@ -64,6 +64,24 @@ def load_transitive_imports(output_directory):
     df = pd.DataFrame(df_data)
     df['id'] = np.arange(len(df)) + 1
     return df
+
+
+def get_absolute_path_to_package_and_version_dict():
+    print(f'Indexing site-packages files ...')
+    package_name_resolver = {}
+    site_packages = site.getsitepackages() + [site.getusersitepackages()]
+    for site_packages_path in site_packages:
+        site_packages_path = Path(site_packages_path)
+        for child in site_packages_path.glob('*.dist-info'):
+            package_name, version = child.stem.split('-', 2)
+            records = pd.read_csv(child / 'RECORD', names=['filename', 'meta0', 'meta1'], header=None)
+            with open(child / 'INSTALLER') as installer_file:
+                installer = installer_file.read()
+            for filename in records['filename']:
+                file_path = str(site_packages_path / filename)
+                package_name_resolver[file_path] = installer, package_name, version
+    print(f'Done indexing site-packages files.')
+    return package_name_resolver
 
 
 @dataclass
