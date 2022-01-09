@@ -40,7 +40,7 @@ def get_size_of_directory(start_path):
 
 
 def compute_weight(sub_df):
-    return sub_df.drop_duplicates(subset='dependency')['dependency_weight'].sum()
+    return sub_df.dropna().drop_duplicates(subset='dependency')['dependency_weight'].sum()
 
 
 @dataclass
@@ -66,20 +66,44 @@ def load_transitive_imports(output_directory):
     return df
 
 
+def get_dict_for_package_dist_info(child):
+    res = {}
+    site_packages_path = child.parent
+    package_name, version = child.stem.split('-', 1)
+    records = pd.read_csv(child / 'RECORD', names=['filename', 'meta0', 'meta1'], header=None)
+    for filename in records['filename']:
+        file_path = str(site_packages_path / filename)
+        res[file_path] = package_name, version
+    return res
+
+
+def get_dict_for_package_egg_info(child):
+    res = {}
+    package_name, version = child.stem.split('-', 1)
+    path = child / 'installed-files.txt'
+    if not path.exists():
+        return res
+    with open(path) as installed_file:
+        for file in installed_file:
+            file_path = str(child / file)
+            res[file_path] = package_name, version
+    return res
+
+
 def get_absolute_path_to_package_and_version_dict():
     print(f'Indexing site-packages files ...')
     package_name_resolver = {}
     site_packages = site.getsitepackages() + [site.getusersitepackages()]
     for site_packages_path in site_packages:
         site_packages_path = Path(site_packages_path)
-        for child in site_packages_path.glob('*.dist-info'):
-            package_name, version = child.stem.split('-', 2)
-            records = pd.read_csv(child / 'RECORD', names=['filename', 'meta0', 'meta1'], header=None)
-            with open(child / 'INSTALLER') as installer_file:
-                installer = installer_file.read().strip()
-            for filename in records['filename']:
-                file_path = str(site_packages_path / filename)
-                package_name_resolver[file_path] = installer, package_name, version
+        if not site_packages_path.exists():
+            print(site_packages_path, 'does not exist')
+            continue
+        for child in site_packages_path.iterdir():
+            if child.suffix == '.dist-info':
+                package_name_resolver.update(get_dict_for_package_dist_info(child))
+            elif child.suffix == '.egg-info':
+                package_name_resolver.update(get_dict_for_package_egg_info(child))
     print(f'Done indexing site-packages files.')
     return package_name_resolver
 
@@ -87,7 +111,7 @@ def get_absolute_path_to_package_and_version_dict():
 def get_dependency(path, absolute_path_to_package_and_version_dict):
     res = absolute_path_to_package_and_version_dict.get(path)
     if res is not None:
-        _, dependency, version = res
+        dependency, version = res
         return f'{dependency}=={version}'
     return np.nan
 
