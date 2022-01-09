@@ -4,6 +4,7 @@ import sqlite3
 from collections import defaultdict
 from copy import copy
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Union
 
@@ -39,13 +40,12 @@ def get_size_of_directory(start_path):
 
 
 def compute_weight(sub_df):
-    return sub_df[['root', 'package_weight']].drop_duplicates()['package_weight'].sum()
+    return sub_df.drop_duplicates(subset='dependency')['dependency_weight'].sum()
 
 
 @dataclass
 class Cohesion:
     score: float
-    full: pd.DataFrame
     definitions: pd.DataFrame
 
 
@@ -76,12 +76,20 @@ def get_absolute_path_to_package_and_version_dict():
             package_name, version = child.stem.split('-', 2)
             records = pd.read_csv(child / 'RECORD', names=['filename', 'meta0', 'meta1'], header=None)
             with open(child / 'INSTALLER') as installer_file:
-                installer = installer_file.read()
+                installer = installer_file.read().strip()
             for filename in records['filename']:
                 file_path = str(site_packages_path / filename)
                 package_name_resolver[file_path] = installer, package_name, version
     print(f'Done indexing site-packages files.')
     return package_name_resolver
+
+
+def get_dependency(path, absolute_path_to_package_and_version_dict):
+    res = absolute_path_to_package_and_version_dict.get(path)
+    if res is not None:
+        _, dependency, version = res
+        return f'{dependency}=={version}'
+    return np.nan
 
 
 @dataclass
@@ -132,36 +140,47 @@ class ImportTree:
             definitions_to_imports=self.definitions_to_imports
         )
 
-    def compute_cohesion(self, weight_func=get_size_of_directory):
-        df = self.get_full_df()
-        concrete_path_to_module_path = {path: str(get_package_dir_site_packages(path)) for path in df['path'].unique()}
-        df['package_path'] = df['path'].map(concrete_path_to_module_path)
-        unique_package_paths = list(set(list(concrete_path_to_module_path.values())))
-        package_path_to_weight = {k: weight_func(k) for k in unique_package_paths}
-        df['package_weight'] = df['package_path'].map(package_path_to_weight)
-        ideal_weight_dict = df.groupby('id_definition').apply(compute_weight).to_dict()
-        df['definition_ideal_weight'] = df['id_definition'].map(ideal_weight_dict)
-        actual_weight_dict = df.groupby('filename_path').apply(compute_weight).to_dict()
-        df['definition_actual_weight'] = df['filename_path'].map(actual_weight_dict)
-        cols = ['id_definition', 'type', 'name', 'start_no', 'end_no', 'filename_path', 'definition_ideal_weight',
-                'definition_actual_weight']
-        definitions_df = df[cols].drop_duplicates()
-        ideal = definitions_df['definition_ideal_weight']
-        actual = definitions_df['definition_actual_weight']
-        definitions_df['cohesion_score'] = ideal / actual
-        definitions_df.loc[definitions_df['definition_actual_weight'] < 1e-4, 'cohesion_score'] = 1.
-        return Cohesion(score=definitions_df['cohesion_score'].mean(),
-                        definitions=definitions_df,
-                        full=df)
+    def cohesion(self, weight_func=get_size_of_directory):
+        df = self.get_packages_df(weight_func)
+        return Cohesion(score=df.drop_duplicates(subset='definition')['cohesion_score'].mean(),
+                        definitions=df)
 
-    def get_full_df(self):
+    def get_full_df(self, weight_func=get_size_of_directory):
         def_with_imports = self.definitions.merge(self.definitions_to_imports,
                                                   left_on='id',
                                                   right_on='definition_id',
                                                   suffixes=('_definition', '_import_df'),
                                                   how='left')
         df = def_with_imports.merge(self.import_data, left_on='import_code_str', right_on='code_str', how='left')
+        concrete_path_to_module_path = {path: str(get_package_dir_site_packages(path)) for path in df['path'].unique()}
+        df['package_path'] = df['path'].map(concrete_path_to_module_path)
+        unique_package_paths = list(set(list(concrete_path_to_module_path.values())))
+        package_path_to_weight = {k: weight_func(k) for k in unique_package_paths}
+        df['package_weight'] = df['package_path'].map(package_path_to_weight)
         return df
+
+    def get_packages_df(self, weight_func=get_size_of_directory):
+        full = self.get_full_df(weight_func)
+        dct = get_absolute_path_to_package_and_version_dict()
+        full['dependency'] = full['path'].map(partial(get_dependency,
+                                                      absolute_path_to_package_and_version_dict=dct))
+        res = pd.DataFrame({
+            'path': full['filename_path'],
+            'definition': full['type'] + ':' + full['name'],
+            'import': full['import_code_str'],
+            'dependency': full['dependency'],
+            'dependency_weight': full['package_weight']
+        })
+        res = res.drop_duplicates()
+        ideal_weight_dict = res.groupby('definition').apply(compute_weight)
+        res['definition_ideal_weight'] = res['definition'].map(ideal_weight_dict)
+        actual_weight_dict = res.groupby('path').apply(compute_weight).to_dict()
+        res['definition_actual_weight'] = res['path'].map(actual_weight_dict)
+        ideal = res['definition_ideal_weight']
+        actual = res['definition_actual_weight']
+        res['cohesion_score'] = ideal / actual
+        res.loc[res['definition_actual_weight'] < 1e-4, 'cohesion_score'] = 1.
+        return res
 
     @classmethod
     def from_dump(cls, output_directory: Union[str, Path]):

@@ -1,6 +1,6 @@
 # py-import-tree
-Analyzing the tree of imports of running Python code.
 
+Analyzing the tree of imports of running Python code.
 
 ## Example
 
@@ -36,13 +36,14 @@ def something_simple():
 Now, let's analyze this project with `py_import_tree`!
 
 ### py_import_tree usage
+
 ```python
 from py_import_tree.import_tracker import ImportTracker
 
 # First time setup, this traverses imports found in code
 # And executes them to find out which additional packages they bring in.
 tracker = ImportTracker('py_import_tree_results')
-tracker.dump_external_dependencies_for_directory('.')
+tracker.dump_for_directory('.')
 ```
 
 You should see output similar to:
@@ -63,7 +64,7 @@ Next, we can load the results and inspect them (compute cohesion, etc.):
 from py_import_tree.cohesion import ImportTree
 
 tree = ImportTree.from_dump('py_import_tree_results')
-cohesion = tree.compute_cohesion()
+cohesion = tree.cohesion()
 ```
 
 Notice that if you want to import `something_simple`, you will need to import `torch`, despite the fact that `torch` is 
@@ -85,13 +86,14 @@ We can also check per definition results:
 #dataframe with cohesion for every function and class.
 cohesion.definitions
 ```
-
-|     |   id_definition | type        | name             |   start_no |   end_no | filename_path   |   definition_ideal_weight |   definition_actual_weight |   cohesion_score |
-|----:|----------------:|:------------|:-----------------|-----------:|---------:|:----------------|--------------------------:|---------------------------:|-----------------:|
-|   0 |               1 | FunctionDef | torch_utils      |          4 |        5 | heavy.py        |                1452497413 |                 1452497413 |                1 |
-| 306 |               2 | FunctionDef | something_simple |          8 |        9 | heavy.py        |                         0 |                 1452497413 |                0 |
-| 307 |               3 | FunctionDef | counts           |          4 |        8 | simple.py       |                         0 |                          0 |                1 |
-
+|     | path      | definition                   | import                              | dependency                 |   dependency_weight |   definition_ideal_weight |   definition_actual_weight |   cohesion_score |
+|----:|:----------|:-----------------------------|:------------------------------------|:---------------------------|--------------------:|--------------------------:|---------------------------:|-----------------:|
+|   0 | heavy.py  | FunctionDef:torch_utils      | import torch                        | nan                        |          1452132786 |                1452497413 |                 1452497413 |                1 |
+|   4 | heavy.py  | FunctionDef:torch_utils      | import torch                        | nan                        |                   0 |                1452497413 |                 1452497413 |                1 |
+|  78 | heavy.py  | FunctionDef:torch_utils      | import torch                        | typing_extensions==3.7.4.3 |               83727 |                1452497413 |                 1452497413 |                1 |
+| 199 | heavy.py  | FunctionDef:torch_utils      | import torch                        | tqdm==4.59.0               |              280900 |                1452497413 |                 1452497413 |                1 |
+| 306 | heavy.py  | FunctionDef:something_simple | nan                                 | nan                        |                   0 |                         0 |                 1452497413 |                0 |
+| 307 | simple.py | FunctionDef:counts           | from collections import defaultdict | nan                        |                   0 |                         0 |                          0 |                1 |
 You can also check how would the cohesion change if you move a function or a class to another file.
 For example, if we move the other simple function into the file that imports `torch`, this would make
 the cohesion even worse:

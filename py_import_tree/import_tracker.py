@@ -145,7 +145,50 @@ class ImportTracker:
             return False
         return True
 
-    def get_packages_data_in_current_process(self, code_str, node_identifier):
+    def dump_for_directory(self, directory: Union[str, Path]):
+        directory = Path(directory)
+        filenames = list(directory.glob('**/*.py'))
+        already_traversed = set()
+        processes = []
+        for i, filename in enumerate(filenames):
+            with open(filename) as in_file:
+                print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
+                processes += self.dump_for_filename(str(filename),
+                                                    in_file.read(),
+                                                    already_traversed)
+        join_processes(processes)
+
+    def dump_for_filenames(self, filenames, code_strs, already_traversed):
+        processes = []
+        for i, filename in enumerate(filenames):
+            print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
+            processes += self.dump_for_filename(filename, code_strs[i], already_traversed)
+        join_processes(processes)
+
+    def dump_for_filename(self, filename, code_str, already_traversed):
+        try:
+            self._insert_filename(filename)
+        except IntegrityError:
+            print(f'Filename {filename} has already been traversed, skipping.')
+            return []
+        visitor = ImportsAndDefinitionsVisitor()
+        visitor.visit(ast.parse(code_str))
+        processes = []
+        for key, wrapper in visitor.import_wrappers.items():
+            code_str = astunparse.unparse(wrapper.get_statement()).strip()
+            p = self._dump_external_dependencies_of_stmt(code_str, already_traversed)
+            processes.append(p)
+            self._store_arc('FILENAMES_TO_IMPORTS', 'filename_path', 'import_code_str', filename, code_str)
+        for definition in visitor.definitions:
+            definition_id = self._insert_definition(definition, filename)
+            rejecting_vistor = RejectingVisitor(visitor.import_wrappers)
+            rejecting_vistor.visit(definition)
+            for wrapper in rejecting_vistor.get_used_import_names():
+                code_str = astunparse.unparse(wrapper.get_statement()).strip()
+                self._store_arc('DEFINITIONS_TO_IMPORTS', 'definition_id', 'import_code_str', definition_id, code_str)
+        return processes
+
+    def _get_packages_data_in_current_process(self, code_str, node_identifier):
         try:
             print(f'Collecting {node_identifier} "{code_str}"')
             modules_before = sys.modules.copy()
@@ -177,35 +220,25 @@ class ImportTracker:
             pickle.dump(records, out_file)
         print(f'Exiting {node_identifier} "{code_str}"')
 
-    def get_connection(self):
-        db_path = self.get_db_path()
-        should_init = not db_path.exists()
-        conn = sqlite3.connect(self.get_db_path())
-        if should_init:
-            schema_path = Path(__file__).parent / 'schema.sql'
-            with open(schema_path) as schema_file:
-                conn.executescript(schema_file.read())
-        return conn
+    def _insert_code_str(self, code_str):
+        return self._insert_unique('IMPORTS', 'code_str', code_str)
 
-    def insert_code_str(self, code_str):
-        return self.insert_unique('IMPORTS', 'code_str', code_str)
+    def _insert_filename(self, filename):
+        return self._insert_unique('FILENAMES', 'path', filename)
 
-    def insert_filename(self, filename):
-        return self.insert_unique('FILENAMES', 'path', filename)
-
-    def insert_unique(self, table_name, col_name, value):
-        with self.get_connection() as conn:
+    def _insert_unique(self, table_name, col_name, value):
+        with self._get_connection() as conn:
             query = f"""INSERT INTO {table_name}({col_name}) VALUES (?)"""
             c = conn.execute(query, [value])
             conn.commit()
             return c.lastrowid
 
-    def get_file_for_module_name(self, module_str):
+    def _get_file_for_module_name(self, module_str):
         query = """
 SELECT path
 FROM IMPORT_DATA
 WHERE module = :module"""
-        with self.get_connection() as conn:
+        with self._get_connection() as conn:
             c = conn.cursor()
             c.execute(query, {'module': module_str})
             row = c.fetchone()
@@ -213,75 +246,23 @@ WHERE module = :module"""
                 return None
             return row[0]
 
-    def get_db_path(self):
-        return self.output_directory / 'modules.db'
-
-    def dump_package_data(self, code_str, node_id):
-        args = (code_str, node_id)
-        p = Process(target=self.get_packages_data_in_current_process, args=args)
-        p.start()
-        return p
-
-    def dump_external_dependencies_for_directory(self, directory: Union[str, Path]):
-        directory = Path(directory)
-        filenames = list(directory.glob('**/*.py'))
-        already_traversed = set()
-        processes = []
-        for i, filename in enumerate(filenames):
-            with open(filename) as in_file:
-                print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
-                processes += self.dump_external_dependencies_for_filename(str(filename),
-                                                                          in_file.read(),
-                                                                          already_traversed)
-        join_processes(processes)
-
-    def dump_external_dependencies_for_filenames(self, filenames, code_strs, already_traversed):
-        processes = []
-        for i, filename in enumerate(filenames):
-            print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
-            processes += self.dump_external_dependencies_for_filename(filename, code_strs[i], already_traversed)
-        join_processes(processes)
-
-    def dump_external_dependencies_for_filename(self, filename, code_str, already_traversed):
-        try:
-            self.insert_filename(filename)
-        except IntegrityError:
-            print(f'Filename {filename} has already been traversed, skipping.')
-            return []
-        visitor = ImportsAndDefinitionsVisitor()
-        visitor.visit(ast.parse(code_str))
-        processes = []
-        for key, wrapper in visitor.import_wrappers.items():
-            code_str = astunparse.unparse(wrapper.get_statement()).strip()
-            p = self.dump_external_dependencies_of_stmt(code_str, already_traversed)
-            processes.append(p)
-            self.store_arc('FILENAMES_TO_IMPORTS', 'filename_path', 'import_code_str', filename, code_str)
-        for definition in visitor.definitions:
-            definition_id = self.insert_definition(definition, filename)
-            rejecting_vistor = RejectingVisitor(visitor.import_wrappers)
-            rejecting_vistor.visit(definition)
-            for wrapper in rejecting_vistor.get_used_import_names():
-                code_str = astunparse.unparse(wrapper.get_statement()).strip()
-                self.store_arc('DEFINITIONS_TO_IMPORTS', 'definition_id', 'import_code_str', definition_id, code_str)
-        return processes
-
-    def dump_external_dependencies_of_stmt(self, code_str, already_traversed):
+    def _dump_external_dependencies_of_stmt(self, code_str, already_traversed):
         if code_str in already_traversed:
             print(f'Code string "{code_str}" has already been traversed, skipping.')
             return
-        p = self.dump_package_data(code_str, code_str)
+        p = self._dump_package_data(code_str, code_str)
         already_traversed.add(code_str)
         return p
 
-    def store_arc(self, table_name, col0, col1, val0, val1):
-        conn = self.get_connection()
+    def _store_arc(self, table_name, col0, col1, val0, val1):
+        conn = self._get_connection()
         query = f"""INSERT INTO {table_name}({col0}, {col1}) VALUES (?,?)"""
         c = conn.cursor()
         c.execute(query, (val0, val1))
         conn.commit()
 
-    def insert_definition(self, definition, filename):
-        with self.get_connection() as conn:
+    def _insert_definition(self, definition, filename):
+        with self._get_connection() as conn:
             query = f"""
 INSERT INTO DEFINITIONS(type, name, start_no, end_no, filename_path) 
 VALUES (?, ?, ?, ?, ?)
@@ -295,6 +276,21 @@ VALUES (?, ?, ?, ?, ?)
             conn.commit()
             return c.lastrowid
 
+    def _get_connection(self):
+        db_path = self._get_db_path()
+        should_init = not db_path.exists()
+        conn = sqlite3.connect(self._get_db_path())
+        if should_init:
+            schema_path = Path(__file__).parent / 'schema.sql'
+            with open(schema_path) as schema_file:
+                conn.executescript(schema_file.read())
+        return conn
 
+    def _get_db_path(self):
+        return self.output_directory / 'modules.db'
 
-
+    def _dump_package_data(self, code_str, node_id):
+        args = (code_str, node_id)
+        p = Process(target=self._get_packages_data_in_current_process, args=args)
+        p.start()
+        return p
