@@ -94,6 +94,8 @@ cohesion.definitions
 | 199 | heavy.py  | FunctionDef:torch_utils      | import torch                        | tqdm==4.59.0               |              280900 |                1452497413 |                 1452497413 |                1 |
 | 306 | heavy.py  | FunctionDef:something_simple | nan                                 | nan                        |                   0 |                         0 |                 1452497413 |                0 |
 | 307 | simple.py | FunctionDef:counts           | from collections import defaultdict | nan                        |                   0 |                         0 |                          0 |                1 |
+
+
 You can also check how would the cohesion change if you move a function or a class to another file.
 For example, if we move the other simple function into the file that imports `torch`, this would make
 the cohesion even worse:
