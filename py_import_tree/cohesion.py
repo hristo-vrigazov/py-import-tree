@@ -113,7 +113,7 @@ def get_package_weight(dct):
 def get_absolute_path_to_package_and_version_dict():
     print(f'Indexing site-packages files ...')
     package_name_resolver = {}
-    package_weight_dict = {}
+    package_weight_dict = defaultdict(lambda : 0)
     site_packages = site.getsitepackages() + [site.getusersitepackages()]
     for site_packages_path in site_packages:
         site_packages_path = Path(site_packages_path)
