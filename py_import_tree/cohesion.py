@@ -40,7 +40,7 @@ def get_size_of_directory(start_path):
 
 
 def compute_weight(sub_df):
-    return sub_df.dropna().drop_duplicates(subset='dependency')['dependency_weight'].sum()
+    return sub_df.drop_duplicates(subset='dependency')['dependency_weight'].sum()
 
 
 @dataclass

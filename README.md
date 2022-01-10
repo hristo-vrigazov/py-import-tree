@@ -100,7 +100,7 @@ You can also check how would the cohesion change if you move a function or a cla
 For example, if we move the other simple function into the file that imports `torch`, this would make
 the cohesion even worse:
 ```python
-tree.what_if_function_moves('simple.py', 'counts', 'heavy.py').compute_cohesion().score
+tree.what_if_function_moves('simple.py', 'counts', 'heavy.py').cohesion().score
 ```
 
 ```
@@ -109,7 +109,7 @@ tree.what_if_function_moves('simple.py', 'counts', 'heavy.py').compute_cohesion(
 
 However, if we move the function that uses `torch` into a separate file, this would lead to perfect cohesion:
 ```python
-tree.what_if_function_moves('heavy.py', 'torch_utils', 'new.py').compute_cohesion().score
+tree.what_if_function_moves('heavy.py', 'torch_utils', 'new.py').cohesion().score
 ```
 
 ```
@@ -119,7 +119,7 @@ tree.what_if_function_moves('heavy.py', 'torch_utils', 'new.py').compute_cohesio
 What if we move the `something_simple` function into the `simple.py` file?
 
 ```python
-tree.what_if_function_moves('heavy.py', 'something_simple', 'simple.py').compute_cohesion().score
+tree.what_if_function_moves('heavy.py', 'something_simple', 'simple.py').cohesion().score
 ```
 
 ```
