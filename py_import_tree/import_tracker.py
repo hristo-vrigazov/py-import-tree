@@ -146,27 +146,32 @@ class ImportTracker:
             return False
         return True
 
-    def dump_for_directory(self, directory: Union[str, Path]):
+    def dump_for_directory(self, directory: Union[str, Path], max_concurrent_processes=8):
         directory = Path(directory)
         filenames = list(directory.glob('**/*.py'))
+        self.dump_for_filenames(filenames, max_concurrent_processes)
+
+    def dump_for_filenames(self, filenames, max_concurrent_processes):
         already_traversed = set()
         processes = []
         for i, filename in enumerate(filenames):
             with open(filename) as in_file:
                 print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
-                processes += self.dump_for_filename(str(filename),
-                                                    in_file.read(),
-                                                    already_traversed)
-        join_processes(processes)
+                processes += self._dump_for_filename(str(filename),
+                                                     in_file.read(),
+                                                     already_traversed)
+                if len(processes) > max_concurrent_processes:
+                    join_processes(processes)
+                    processes = []
 
-    def dump_for_filenames(self, filenames, code_strs, already_traversed):
+    def _dump_for_filenames(self, filenames, code_strs, already_traversed):
         processes = []
         for i, filename in enumerate(filenames):
             print(f'[{i}/{len(filenames)}]: Dumping {filename}...')
-            processes += self.dump_for_filename(filename, code_strs[i], already_traversed)
+            processes += self._dump_for_filename(filename, code_strs[i], already_traversed)
         join_processes(processes)
 
-    def dump_for_filename(self, filename, code_str, already_traversed):
+    def _dump_for_filename(self, filename, code_str, already_traversed):
         try:
             self._insert_filename(filename)
         except IntegrityError:
@@ -202,9 +207,12 @@ class ImportTracker:
         records = []
         for key, module in modules_after.items():
             if not self.should_be_tracked(key, module, modules_before):
+                if key in {'numpy', 'np'}:
+                    print(module)
                 continue
             record = [get_root_module(key), key]
             try:
+                print(module)
                 record.append(module.__file__)
             except:
                 record.append(None)
