@@ -114,6 +114,7 @@ def join_processes(processes):
         if process is None:
             continue
         process.join()
+        process.close()
 
 
 class ImportTracker:
@@ -291,7 +292,8 @@ VALUES (?, ?, ?, ?, ?)
 
     def _dump_package_data(self, code_str, node_id):
         args = (code_str, node_id)
-        p = Process(target=self._get_packages_data_in_current_process, args=args)
+        p = Process(target=self._get_packages_data_in_current_process,
+                    args=args,
+                    )
         p.start()
-        p.join()
         return p
