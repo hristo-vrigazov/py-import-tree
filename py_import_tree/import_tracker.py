@@ -293,4 +293,5 @@ VALUES (?, ?, ?, ?, ?)
         args = (code_str, node_id)
         p = Process(target=self._get_packages_data_in_current_process, args=args)
         p.start()
+        p.join()
         return p

@@ -192,12 +192,12 @@ class ImportTree:
             definitions_to_imports=self.definitions_to_imports
         )
 
-    def cohesion(self, weight_func=get_size_of_directory):
-        df = self.get_packages_df(weight_func)
+    def cohesion(self):
+        df = self.get_packages_df()
         return Cohesion(score=df.drop_duplicates(subset='definition')['cohesion_score'].mean(),
                         definitions=df)
 
-    def get_full_df(self, weight_func=get_size_of_directory):
+    def get_full_df(self):
         def_with_imports = self.definitions.merge(self.definitions_to_imports,
                                                   left_on='id',
                                                   right_on='definition_id',
@@ -206,8 +206,8 @@ class ImportTree:
         df = def_with_imports.merge(self.import_data, left_on='import_code_str', right_on='code_str', how='left')
         return df
 
-    def get_packages_df(self, weight_func=get_size_of_directory):
-        full = self.get_full_df(weight_func)
+    def get_packages_df(self):
+        full = self.get_full_df()
         dct, package_weight = get_absolute_path_to_package_and_version_dict()
         full['dependency'] = full['path'].map(partial(get_dependency,
                                                       absolute_path_to_package_and_version_dict=dct))
