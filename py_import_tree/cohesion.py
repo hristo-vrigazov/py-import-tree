@@ -66,33 +66,54 @@ def load_transitive_imports(output_directory):
     return df
 
 
+def read_child_files_of_package(child, package_name, version):
+    return {str(module_path.resolve()): (package_name, version) for module_path in
+            (child.parent / package_name).glob('**/*')}
+
+
+def read_installed_files(child, package_name, version):
+    res = {}
+    path = child / 'installed-files.txt'
+    if not path.exists():
+        return res
+    with open(path) as installed_file:
+        for file in installed_file:
+            file_path = str((child / file).resolve())
+            res[file_path] = package_name, version
+    return res
+
+
 def get_dict_for_package_dist_info(child):
     res = {}
     site_packages_path = child.parent
     package_name, version = child.stem.split('-', 1)
     records = pd.read_csv(child / 'RECORD', names=['filename', 'meta0', 'meta1'], header=None)
     for filename in records['filename']:
-        file_path = str(site_packages_path / filename)
+        file_path = str((site_packages_path / filename).resolve())
         res[file_path] = package_name, version
+    res.update(read_child_files_of_package(child, package_name, version))
     return res
 
 
 def get_dict_for_package_egg_info(child):
-    res = {}
     package_name, version = child.stem.split('-', 1)
-    path = child / 'installed-files.txt'
-    if not path.exists():
-        return res
-    with open(path) as installed_file:
-        for file in installed_file:
-            file_path = str(child / file)
-            res[file_path] = package_name, version
+    res = read_installed_files(child, package_name, version)
+    res.update(read_child_files_of_package(child, package_name, version))
     return res
+
+
+def get_package_weight(dct):
+    total = 0
+    for file in dct:
+        if os.path.exists(file):
+            total += os.path.getsize(file)
+    return total
 
 
 def get_absolute_path_to_package_and_version_dict():
     print(f'Indexing site-packages files ...')
     package_name_resolver = {}
+    package_weight_dict = {}
     site_packages = site.getsitepackages() + [site.getusersitepackages()]
     for site_packages_path in site_packages:
         site_packages_path = Path(site_packages_path)
@@ -100,12 +121,19 @@ def get_absolute_path_to_package_and_version_dict():
             print(site_packages_path, 'does not exist')
             continue
         for child in site_packages_path.iterdir():
+            if child.suffix not in {'.dist-info', '.egg-info'}:
+                continue
             if child.suffix == '.dist-info':
-                package_name_resolver.update(get_dict_for_package_dist_info(child))
+                dct = get_dict_for_package_dist_info(child)
             elif child.suffix == '.egg-info':
-                package_name_resolver.update(get_dict_for_package_egg_info(child))
+                dct = get_dict_for_package_egg_info(child)
+            else:
+                dct = {}
+            package_name_resolver.update(dct)
+            package_name, version = child.stem.split('-', 1)
+            package_weight_dict[f'{package_name}=={version}'] = get_package_weight(dct)
     print(f'Done indexing site-packages files.')
-    return package_name_resolver
+    return package_name_resolver, package_weight_dict
 
 
 def get_dependency(path, absolute_path_to_package_and_version_dict):
@@ -176,16 +204,11 @@ class ImportTree:
                                                   suffixes=('_definition', '_import_df'),
                                                   how='left')
         df = def_with_imports.merge(self.import_data, left_on='import_code_str', right_on='code_str', how='left')
-        concrete_path_to_module_path = {path: str(get_package_dir_site_packages(path)) for path in df['path'].unique()}
-        df['package_path'] = df['path'].map(concrete_path_to_module_path)
-        unique_package_paths = list(set(list(concrete_path_to_module_path.values())))
-        package_path_to_weight = {k: weight_func(k) for k in unique_package_paths}
-        df['package_weight'] = df['package_path'].map(package_path_to_weight)
         return df
 
     def get_packages_df(self, weight_func=get_size_of_directory):
         full = self.get_full_df(weight_func)
-        dct = get_absolute_path_to_package_and_version_dict()
+        dct, package_weight = get_absolute_path_to_package_and_version_dict()
         full['dependency'] = full['path'].map(partial(get_dependency,
                                                       absolute_path_to_package_and_version_dict=dct))
         res = pd.DataFrame({
@@ -193,9 +216,9 @@ class ImportTree:
             'definition': full['type'] + ':' + full['name'],
             'import': full['import_code_str'],
             'dependency': full['dependency'],
-            'dependency_weight': full['package_weight']
+            'transitive_import_filename': full['path']
         })
-        res = res.drop_duplicates()
+        res['dependency_weight'] = res['dependency'].map(package_weight)
         ideal_weight_dict = res.groupby('definition').apply(compute_weight)
         res['definition_ideal_weight'] = res['definition'].map(ideal_weight_dict)
         actual_weight_dict = res.groupby('path').apply(compute_weight).to_dict()
