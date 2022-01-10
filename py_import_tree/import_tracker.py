@@ -207,12 +207,9 @@ class ImportTracker:
         records = []
         for key, module in modules_after.items():
             if not self.should_be_tracked(key, module, modules_before):
-                if key in {'numpy', 'np'}:
-                    print(module)
                 continue
             record = [get_root_module(key), key]
             try:
-                print(module)
                 record.append(module.__file__)
             except:
                 record.append(None)
