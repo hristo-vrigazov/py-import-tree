@@ -213,14 +213,16 @@ class ImportTree:
                                                       absolute_path_to_package_and_version_dict=dct))
         res = pd.DataFrame({
             'path': full['filename_path'],
-            'definition': full['type'] + ':' + full['name'],
+            'name': full['name'],
             'import': full['import_code_str'],
             'dependency': full['dependency'],
+            'full_definition': full['filename_path'] + ':' + full['type'] + ':' + full['name'],
+            'definition': full['type'] + ':' + full['name'],
             'transitive_import_filename': full['path']
         })
         res['dependency_weight'] = res['dependency'].map(package_weight)
-        ideal_weight_dict = res.groupby('definition').apply(compute_weight)
-        res['definition_ideal_weight'] = res['definition'].map(ideal_weight_dict)
+        ideal_weight_dict = res.groupby('full_definition').apply(compute_weight)
+        res['definition_ideal_weight'] = res['full_definition'].map(ideal_weight_dict)
         actual_weight_dict = res.groupby('path').apply(compute_weight).to_dict()
         res['definition_actual_weight'] = res['path'].map(actual_weight_dict)
         ideal = res['definition_ideal_weight']
