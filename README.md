@@ -2,6 +2,9 @@
 
 Analyzing the tree of imports of running Python code.
 
+Uses a combination of AST (abstract syntax tree) and code execution (tracing), to give you useful insights into 
+your project.
+
 ## Example
 
 
@@ -125,5 +128,20 @@ tree.what_if_function_moves('heavy.py', 'something_simple', 'simple.py').cohesio
 ```
 1.0
 ```
+
+You can also use the resulting dataframe to analyze exact, locked versions for each function/class in your project:
+
+```python
+cohesion.definitions[['full_definition', 'dependency']].drop_duplicates()
+```
+
+|     | full_definition                       | dependency                 |
+|----:|:--------------------------------------|:---------------------------|
+| 438 | heavy.py:FunctionDef:something_simple | nan                        |
+|   0 | heavy.py:FunctionDef:torch_utils      | torch==1.10.1-py3.8        |
+|   6 | heavy.py:FunctionDef:torch_utils      | nan                        |
+| 115 | heavy.py:FunctionDef:torch_utils      | typing_extensions==3.7.4.3 |
+| 274 | heavy.py:FunctionDef:torch_utils      | tqdm==4.59.0               |
+| 439 | simple.py:FunctionDef:counts          | nan                        |
 
 Enjoy!

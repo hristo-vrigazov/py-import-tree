@@ -229,6 +229,8 @@ class ImportTree:
         actual = res['definition_actual_weight']
         res['cohesion_score'] = ideal / actual
         res.loc[res['definition_actual_weight'] < 1e-4, 'cohesion_score'] = 1.
+        res['neg_definition_actual_weight'] = -res['definition_actual_weight']
+        res = res.sort_values(by=['cohesion_score', 'neg_definition_actual_weight'])
         return res
 
     @classmethod
