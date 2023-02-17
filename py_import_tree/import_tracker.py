@@ -117,13 +117,20 @@ def join_processes(processes):
         process.close()
 
 
+def get_std_list():
+    try:
+        return stdlib_list()
+    except FileNotFoundError:
+        return list(set(list(sys.stdlib_module_names) + list(sys.builtin_module_names)))
+
+
 class ImportTracker:
 
     def __init__(self, output_directory: Union[str, Path],
                  blacklisting_function=None):
         self.output_directory = Path(output_directory)
         self.output_directory.mkdir(exist_ok=True)
-        self.stdlib_packages_set = set(stdlib_list())
+        self.stdlib_packages_set = set(get_std_list())
         self.blacklisting_function = blacklisting_function
 
     def module_should_be_tracked(self, key):
